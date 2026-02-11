@@ -5,9 +5,14 @@
 #include <termios.h>
 
 #define CFG_PATH "../config/test"
+#define XDG_X11_NAME "x11"
+#define XDG_WAYLAND_NAME "wayland"
+#define X11_COPY "xclip -selection clipboard"
+#define WAYLAND_COPY "wl-copy"
 #define MAX_CFG_LINE_LEN 1024
 #define MAX_INPUT_LEN 1024
 #define MAX_RES_LEN 1024
+#define CLIPBOARD_SIZE 4096
 
 #define BACKSPACE 127
 // EOF for ~ICANON
@@ -26,12 +31,16 @@ int translate_word(const char *word, Translation *dict,  int dict_len, char *res
 void enable_raw_mode();
 void disable_raw_mode();
 void replace_input_res_raw(char *res, int input_len);
+int copy_buf_to_clipboard(const char *buffer, const char *command);
+const char *get_copy_cmd();
+
 // void free_dict(Translation *dict);
 
 /*
 TODO:
 
 - implement EOF and '\n' behaviour
+- implement delete on raw input
 - handle unsorted configs
 - implement non-interactive mode
 - free on exit
@@ -39,8 +48,10 @@ TODO:
 */
 
 int main(int argc, const char *argv[]) {
+	const char *copy_cmd = get_copy_cmd();
 	char input_buf[MAX_INPUT_LEN];
 	char res_buf[MAX_RES_LEN];
+	char clip_buf[CLIPBOARD_SIZE] = {0};
 	int dict_len;
 	Translation *dict = load_dict(CFG_PATH, &dict_len);
 	enable_raw_mode();
@@ -53,27 +64,86 @@ int main(int argc, const char *argv[]) {
 		if (c == CTRL_D || c == '\n') {
 			input_buf[i] = '\0';
 			int input_len = translate_word(input_buf, dict, dict_len, res_buf);
+			if (copy_cmd) {
+				// not first word
+				if (strlen(clip_buf) > 0)
+					strncat(clip_buf, " ", CLIPBOARD_SIZE - strlen(clip_buf) - 1);
+				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
+				copy_buf_to_clipboard(clip_buf, copy_cmd);
+			}
 			replace_input_res_raw(res_buf, input_len);
-       	}
+			printf("\n");
+			break;
+		}
        	// space - translate buffer
-        if (c == ' ') {
+		else if (c == ' ') {
         	input_buf[i] = '\0';
 			i = 0;
+
 			int input_len = translate_word(input_buf, dict, dict_len, res_buf);
+			// append to clipboard buffer if compatible
+			if (copy_cmd) {
+				// not first word
+				if (strlen(clip_buf) > 0)
+					strncat(clip_buf, " ", CLIPBOARD_SIZE - strlen(clip_buf) - 1);
+				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
+			}
 			replace_input_res_raw(res_buf, input_len);
 		}
+		else if (i < MAX_INPUT_LEN - 1) {
 		// any other key - put in buffer and echo
-        else if (i < MAX_INPUT_LEN - 1) {
         	input_buf[i++] = c;
         	putchar(c);
         	fflush(stdout);
         }
         // overflow or garbage
-        else {
-        	// free
+		else {
+        	/* free */
         	return -1;
         }
 	}
+	/* free */
+	return 0;
+}
+
+// returns env name
+const char *get_copy_cmd() {
+	char *session = getenv("XDG_SESSION_TYPE");
+	if (!session)
+		return NULL;
+
+	// wayland
+	if (!strcmp(session, XDG_WAYLAND_NAME)) {
+		if (!system("command -v wl-copy > /dev/null"))
+			return WAYLAND_COPY;
+		else
+			printf("wl-copy not found on PATH, copy feature unavaliable\n");
+	}
+	// x11
+	else if (!strcmp(session, XDG_X11_NAME)) {
+		if (!system("command -v xclip > /dev/null"))
+			return X11_COPY;
+		else
+			printf("xclip not found on PATH, copy feature unavaliable\n");
+	}
+	// unsupported
+	else
+		printf("copy feature not supported on your environment\n");
+
+	return NULL;
+}
+
+int copy_buf_to_clipboard(const char *buffer, const char *command) {
+	if (!buffer || !command)
+		return 0;
+
+	FILE *copy_proc = popen(command, "w");
+	if (!copy_proc)
+		return 0;
+
+	fputs(buffer, copy_proc);
+	pclose(copy_proc);
+	return 1;
 }
 
 void replace_input_res_raw(char *res, int input_len) {
@@ -84,10 +154,6 @@ void replace_input_res_raw(char *res, int input_len) {
 	// erase from current position
 	printf("\033[K");
 	fflush(stdout);
-}
-
-void free_dict(Translation *dict) {
-
 }
 
 void enable_raw_mode() {
