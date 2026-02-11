@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -13,12 +14,10 @@
 #define MAX_INPUT_LEN 1024
 #define MAX_RES_LEN 1024
 #define CLIPBOARD_SIZE 4096
-
 #define BACKSPACE 127
+#define DELETE
 // EOF for ~ICANON
 #define CTRL_D 4
-
-
 typedef struct Translation {
 	char *src;
 	char *dest;
@@ -28,13 +27,12 @@ struct termios orig;
 
 Translation *load_dict(char *path, int *dict_len_buf);
 int translate_word(const char *word, Translation *dict,  int dict_len, char *res_buffer);
+int compare_translations(const void *t1, const void *t2);
 void enable_raw_mode();
 void disable_raw_mode();
 void replace_input_res_raw(char *res, int input_len);
 int copy_buf_to_clipboard(const char *buffer, const char *command);
-int compare_translations(const void *t1, const void *t2);
 const char *get_copy_cmd();
-
 // void free_dict(Translation *dict);
 
 /*
@@ -42,12 +40,11 @@ TODO:
 
 + EOF and '\n' behaviour
 + handle unsorted dictionary configs
-- delete on raw input
++ delete on raw input
 - free on exit
 - non-interactive mode
 
 */
-
 int main(int argc, const char *argv[]) {
 	const char *copy_cmd = get_copy_cmd();
 	char input_buf[MAX_INPUT_LEN];
@@ -60,11 +57,14 @@ int main(int argc, const char *argv[]) {
 	int i = 0;
 	while (1) {
 		int c = getchar();
-
 		// EOF or Enter - translate buffer, copy to clipboard and exit
 		if (c == CTRL_D || c == '\n') {
 			input_buf[i] = '\0';
-			int input_len = translate_word(input_buf, dict, dict_len, res_buf);
+			int input_len = strlen(input_buf);
+			if (!translate_word(input_buf, dict, dict_len, res_buf))
+				return -1;
+
+			// append to clipboard buffer if compatible
 			if (copy_cmd) {
 				// not first word
 				if (strlen(clip_buf) > 0)
@@ -81,26 +81,32 @@ int main(int argc, const char *argv[]) {
         	input_buf[i] = '\0';
 			i = 0;
 
-			int input_len = translate_word(input_buf, dict, dict_len, res_buf);
-			// append to clipboard buffer if compatible
+			int input_len = strlen(input_buf);
+			if (!translate_word(input_buf, dict, dict_len, res_buf))
+				return -1;
+
 			if (copy_cmd) {
-				// not first word
 				if (strlen(clip_buf) > 0)
 					strncat(clip_buf, " ", CLIPBOARD_SIZE - strlen(clip_buf) - 1);
 				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
 			}
 			replace_input_res_raw(res_buf, input_len);
 		}
-		else if (i < MAX_INPUT_LEN - 1) {
+		// backspace - remove previous
+		else if (c == BACKSPACE) {
+			if (i > 0) {
+				i--;
+				printf("\b");
+				printf(" ");
+				printf("\b");
+				fflush(stdout);
+			}
+		}
 		// any other key - put in buffer and echo
+		else if (isalpha(c) && (i < MAX_INPUT_LEN - 1)) {
         	input_buf[i++] = c;
         	putchar(c);
         	fflush(stdout);
-        }
-        // overflow or garbage
-		else {
-        	/* free */
-        	return -1;
         }
 	}
 	/* free */
