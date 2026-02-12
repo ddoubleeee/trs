@@ -65,11 +65,10 @@ int main(int argc, const char *argv[]) {
 		// EOF or Enter - translate buffer, copy to clipboard and exit
 		if (c == CTRL_D || c == '\n') {
 			input_buf[i] = '\0';
-			int input_len = strlen(input_buf);
+			int input_len = i;
 			if (!translate_word(input_buf, dict, dict_len, res_buf)) goto cleanup;
 			if (!replace_input_res_raw(res_buf, input_len)) goto cleanup;
 			printf("\n");
-			break;
 
 			// append to clipboard buffer if compatible
 			if (copy_cmd) {
@@ -79,18 +78,17 @@ int main(int argc, const char *argv[]) {
 				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
 				copy_buf_to_clipboard(clip_buf, copy_cmd);
 			}
+			break;
 		}
        	// space - translate buffer
 		else if (c == ' ') {
         	input_buf[i] = '\0';
+			int input_len = i;
 			i = 0;
+			if (!translate_word(input_buf, dict, dict_len, res_buf)) goto cleanup;
+			if (!replace_input_res_raw(res_buf, input_len)) goto cleanup;
 
-			int input_len = strlen(input_buf);
-			if (!translate_word(input_buf, dict, dict_len, res_buf))
-				goto cleanup;
-			if (!replace_input_res_raw(res_buf, input_len))
-				goto cleanup;
-
+			// append to clipboard buffer if compatible
 			if (copy_cmd) {
 				if (strlen(clip_buf) > 0)
 					strncat(clip_buf, " ", CLIPBOARD_SIZE - strlen(clip_buf) - 1);
