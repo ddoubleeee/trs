@@ -30,8 +30,9 @@ int translate_word(const char *word, Translation *dict,  int dict_len, char *res
 int compare_translations(const void *t1, const void *t2);
 void enable_raw_mode();
 void disable_raw_mode();
-void replace_input_res_raw(char *res, int input_len);
+int replace_input_res_raw(char *res, int input_len);
 int copy_buf_to_clipboard(const char *buffer, const char *command);
+
 const char *get_copy_cmd();
 // void free_dict(Translation *dict);
 
@@ -52,6 +53,10 @@ int main(int argc, const char *argv[]) {
 	char clip_buf[CLIPBOARD_SIZE] = {0};
 	int dict_len;
 	Translation *dict = load_dict(DICT_CFG_PATH, &dict_len);
+	if (!dict) {
+		printf("config not found\n");
+		goto cleanup;
+	}
 	enable_raw_mode();
 
 	int i = 0;
@@ -61,8 +66,10 @@ int main(int argc, const char *argv[]) {
 		if (c == CTRL_D || c == '\n') {
 			input_buf[i] = '\0';
 			int input_len = strlen(input_buf);
-			if (!translate_word(input_buf, dict, dict_len, res_buf))
-				return -1;
+			if (!translate_word(input_buf, dict, dict_len, res_buf)) goto cleanup;
+			if (!replace_input_res_raw(res_buf, input_len)) goto cleanup;
+			printf("\n");
+			break;
 
 			// append to clipboard buffer if compatible
 			if (copy_cmd) {
@@ -72,9 +79,6 @@ int main(int argc, const char *argv[]) {
 				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
 				copy_buf_to_clipboard(clip_buf, copy_cmd);
 			}
-			replace_input_res_raw(res_buf, input_len);
-			printf("\n");
-			break;
 		}
        	// space - translate buffer
 		else if (c == ' ') {
@@ -83,14 +87,15 @@ int main(int argc, const char *argv[]) {
 
 			int input_len = strlen(input_buf);
 			if (!translate_word(input_buf, dict, dict_len, res_buf))
-				return -1;
+				goto cleanup;
+			if (!replace_input_res_raw(res_buf, input_len))
+				goto cleanup;
 
 			if (copy_cmd) {
 				if (strlen(clip_buf) > 0)
 					strncat(clip_buf, " ", CLIPBOARD_SIZE - strlen(clip_buf) - 1);
 				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
 			}
-			replace_input_res_raw(res_buf, input_len);
 		}
 		// backspace - remove previous
 		else if (c == BACKSPACE) {
@@ -111,6 +116,11 @@ int main(int argc, const char *argv[]) {
 	}
 	/* free */
 	return 0;
+
+	cleanup:
+		/* free */
+		return -1;
+
 }
 
 // returns env name
@@ -153,7 +163,7 @@ int copy_buf_to_clipboard(const char *buffer, const char *command) {
 	return 1;
 }
 
-void replace_input_res_raw(char *res, int input_len) {
+int replace_input_res_raw(char *res, int input_len) {
 	// move input_len left
 	printf("\033[%iD", input_len);
 	// printing will overwrite
@@ -161,12 +171,13 @@ void replace_input_res_raw(char *res, int input_len) {
 	// erase from current position
 	printf("\033[K");
 	fflush(stdout);
+	return 1;
 }
 
 void enable_raw_mode() {
     tcgetattr(STDIN_FILENO, &orig);
-
     struct termios raw = orig;
+
     raw.c_lflag &= ~(ECHO | ICANON);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 
@@ -210,7 +221,6 @@ Translation *load_dict(char *path, int *dict_len_buf) {
 		qsort(dict, line_count, sizeof(Translation), compare_translations);
 		return dict;
 	}
-	perror("fopen");
 	return NULL;
 }
 
@@ -254,5 +264,5 @@ int translate_word(const char *word, Translation *dict,  int dict_len, char *res
 	}
 	res_buffer[res_i] = '\0';
 
-	return word_len;
+	return 1;
 }
