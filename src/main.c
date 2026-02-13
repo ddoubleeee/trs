@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <termios.h>
 
-#define DICT_CFG_PATH "../config/test.dict"
+#define CFG_HOME_REL_PATH "trs/test.dict"
 #define XDG_X11_NAME "x11"
 #define XDG_WAYLAND_NAME "wayland"
 #define X11_COPY_CMD "xclip -selection clipboard"
@@ -12,11 +12,12 @@
 #define MAX_DICT_CFG_LINE_LEN 1024
 #define MAX_INPUT_LEN 1024
 #define MAX_RES_LEN 1024
+#define MAX_CFG_PATH_LEN 1024
 #define CLIPBOARD_SIZE 4096
-#define BACKSPACE 127
-#define DELETE
-// EOF for ~ICANON
-#define CTRL_D 4
+#define BACKSPACE_CODE 127 // for ~ICANON
+#define EOF_CODE 4 // for ~ICANON
+
+
 typedef struct Translation {
 	char *src;
 	char *dest;
@@ -29,9 +30,10 @@ void translate_word(const char *word, Translation *dict,  int dict_len, char *re
 int compare_translations(const void *t1, const void *t2);
 void enable_raw_mode();
 void disable_raw_mode();
-void replace_input_res_raw(char *res, int input_len);
+void replace_input_res_raw( int input_len, char *res);
 int copy_buf_to_clipboard(const char *buffer, const char *command);
 void free_dict(Translation *dict, int dict_len);
+char *get_cfg_path(char *cfg_path_buf);
 
 const char *get_copy_cmd();
 
@@ -41,19 +43,24 @@ TODO:
 + EOF and '\n' behaviour
 + handle unsorted dictionary configs
 + delete during input
++ check for config
 - fix bugs on arrows and other control input
-- free on exit
 - non-interactive mode
 
+KNOWN BUGS:
+
+- inconsistent behaviour on spaces in copy-paste buffer:
+					currently removes leading spaces
 */
 int main(int argc, const char *argv[]) {
 	char input_buf[MAX_INPUT_LEN];
 	char res_buf[MAX_RES_LEN];
 	char clip_buf[CLIPBOARD_SIZE] = {0};
 	int dict_len;
+	char cfg_path_buf[MAX_CFG_PATH_LEN];
 	const char *copy_cmd = get_copy_cmd();
 
-	Translation *dict = load_dict(DICT_CFG_PATH, &dict_len);
+	Translation *dict = load_dict(get_cfg_path(cfg_path_buf), &dict_len);
 	if (!dict) return -1;
 
 	enable_raw_mode();
@@ -63,11 +70,11 @@ int main(int argc, const char *argv[]) {
 		int c = getchar();
 
 		// EOF or Enter - translate buffer, copy to clipboard and exit
-		if (c == CTRL_D || c == '\n') {
+		if (c == EOF_CODE || c == '\n') {
 			input_buf[i] = '\0';
 			int input_len = i;
 			translate_word(input_buf, dict, dict_len, res_buf);
-			replace_input_res_raw(res_buf, input_len);
+			replace_input_res_raw(input_len, res_buf);
 			printf("\n");
 
 			// append to clipboard buffer if compatible
@@ -81,24 +88,31 @@ int main(int argc, const char *argv[]) {
 			break;
 		}
 
-       	// space - translate buffer
+       	// space - translate buffer and echo
 		else if (c == ' ') {
         	input_buf[i] = '\0';
 			int input_len = i;
 			i = 0;
 			translate_word(input_buf, dict, dict_len, res_buf);
-			replace_input_res_raw(res_buf, input_len);
+			// just echo if ntng to translate
+			if (input_len == 0 && strlen(res_buf) == 0)
+				putchar(' ');
+			// replace input with translation and echo
+			else
+				replace_input_res_raw(input_len, res_buf);
+			fflush(stdout);
 
 			// append to clipboard buffer if compatible
 			if (copy_cmd) {
-				if (strlen(clip_buf) > 0)
-					strncat(clip_buf, " ", CLIPBOARD_SIZE - strlen(clip_buf) - 1);
-				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - strlen(clip_buf) - 1);
+				int clip_buf_len = strlen(clip_buf);
+				if (clip_buf_len > 0)
+					strncat(clip_buf, " ", CLIPBOARD_SIZE - clip_buf_len - 1);
+				strncat(clip_buf, res_buf, CLIPBOARD_SIZE - clip_buf_len - 1);
 			}
 		}
 
 		// backspace - remove previous
-		else if (c == BACKSPACE) {
+		else if (c == BACKSPACE_CODE) {
 			if (i > 0) {
 				i--;
 				printf("\b");
@@ -119,9 +133,25 @@ int main(int argc, const char *argv[]) {
 	return 0;
 }
 
+char *get_cfg_path(char *cfg_path_buf) {
+	// try thru xdg first
+	const char *home_config_dir_path = getenv("XDG_CONFIG_HOME");
+	if (home_config_dir_path) {
+		snprintf(cfg_path_buf, MAX_CFG_PATH_LEN, "%s/%s", home_config_dir_path, CFG_HOME_REL_PATH);
+	}
+	// if xdg not set try $HOME
+	else {
+		const char *home_config_dir_path_default = getenv("HOME");
+		if (!home_config_dir_path_default) return NULL;
+
+		snprintf(cfg_path_buf, MAX_CFG_PATH_LEN, "%s/.config/%s", home_config_dir_path_default, CFG_HOME_REL_PATH);
+	}
+	return cfg_path_buf;
+}
+
 // returns env name
 const char *get_copy_cmd() {
-	char *session = getenv("XDG_SESSION_TYPE");
+	const char *session = getenv("XDG_SESSION_TYPE");
 	if (!session) return NULL;
 
 	// wayland
@@ -163,12 +193,10 @@ int copy_buf_to_clipboard(const char *buffer, const char *command) {
 	return 1;
 }
 
-void replace_input_res_raw(char *res, int input_len) {
-	// move input_len left
+void replace_input_res_raw(int input_len, char *res) {
+	// override if anything written
 	printf("\033[%dD", input_len);
-	// printing will overwrite
 	printf("%s ", res);
-	// erase from current position
 	printf("\033[K");
 	fflush(stdout);
 }
