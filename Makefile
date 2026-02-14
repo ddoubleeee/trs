@@ -2,8 +2,8 @@ CC = cc
 CFLAGS = -O2 -Wall
 SRC = src/main.c
 BIN = trs
+DICTS_DIR = dicts
 CONFIG_DIR = $(HOME)/.config/trs
-DICT_FILE = example.dict
 USR_LOCAL_BIN_PATH = /usr/local/bin
 
 .PHONY: all clean install uninstall
@@ -19,7 +19,7 @@ install: $(BIN)
 	@echo "Creating $(CONFIG_DIR)/ ..."
 	mkdir -p $(CONFIG_DIR)
 	@echo "Copying example config ..."
-	cp -n $(DICT_FILE) $(CONFIG_DIR)/
+	cp -n $(DICTS_DIR)/*.dict $(CONFIG_DIR)/
 	@echo "Done"
 
 clean:
