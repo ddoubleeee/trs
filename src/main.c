@@ -47,7 +47,8 @@ TODO:
 + delete during input
 + check for .dict file
 	(current behaviour: looks for *.dict, prioritising alpha unless TRS_DEFAULT_DICT env var is set)
-	- add --dict= flag
+	- add --dict= flag?
+	- define default dict thru env var?
 - fix bugs on arrows and other control input
 - refactor loading to dynamic realloc
 - non-interactive mode
