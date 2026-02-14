@@ -12,7 +12,7 @@ Lightweight tool for interactive transliteration (or other `key=value` mappings)
 
 ####  `trs` allows you to define a set of `key=value` pairs and interactively translate typed keys to corresponding values, automatically copying final output to the clipboard.
 
-`trs` started as a tiny personal script that allowed me to message in non-Latin languages without having an extra keyboard layout. It can be useful for others who rely on transliteration, though the `key=value` logic makes it handy for any other mappings as well.
+`trs` started as a tiny personal script that allowed me to message in non-Latin languages without having an extra keyboard layout. It can be useful for others who rely on transliteration, though the `key=value` logic makes it handy for other mappings as well.
 
 
 ## Building
