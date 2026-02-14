@@ -14,12 +14,12 @@ $(BIN): $(SRC)
 	$(CC) $(CFLAGS) -o $(BIN) $(SRC)
 
 install: $(BIN)
+	@echo "Installing binary to $(USR_LOCAL_BIN_PATH)/ ..."
+	sudo cp $(BIN) $(USR_LOCAL_BIN_PATH)/
 	@echo "Creating $(CONFIG_DIR)/ ..."
 	mkdir -p $(CONFIG_DIR)
 	@echo "Copying example config ..."
 	cp -n $(DICT_FILE) $(CONFIG_DIR)/
-	@echo "Installing binary to $(USR_LOCAL_BIN_PATH)/ ..."
-	cp $(BIN) $(USR_LOCAL_BIN_PATH)/
 	@echo "Done"
 
 clean:
