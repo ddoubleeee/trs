@@ -1,14 +1,30 @@
-CC = gcc
-CFLAGS = -Wall -Wextra
-SRC = $(wildcard src/*.c)
-OUT = bin/main
+CC = cc
+CFLAGS = -O2 -Wall
+SRC = src/main.c
+BIN = trs
+CONFIG_DIR = $(HOME)/.config/trs
+DICT_FILE = example.dict
+USR_LOCAL_BIN_PATH = /usr/local/bin
 
-all: $(OUT)
+.PHONY: all clean install uninstall
 
-$(OUT): $(SRC)
-	mkdir -p bin
-	$(CC) $(CFLAGS) $(SRC) -o $(OUT)
+all: $(BIN)
 
+$(BIN): $(SRC)
+	$(CC) $(CFLAGS) -o $(BIN) $(SRC)
+
+install: $(BIN)
+	@echo "Creating $(CONFIG_DIR)/ ..."
+	mkdir -p $(CONFIG_DIR)
+	@echo "Copying example config ..."
+	cp -n $(DICT_FILE) $(CONFIG_DIR)/
+	@echo "Installing binary to $(USR_LOCAL_BIN_PATH)/ ..."
+	cp $(BIN) $(USR_LOCAL_BIN_PATH)/
+	@echo "Done"
 
 clean:
-	rm -rf bin
+	rm -f $(BIN)
+
+uninstall:
+	rm -f $(USR_LOCAL_BIN_PATH)/$(BIN)
+	@echo "Uninstalled $(BIN), dictionaries and config directory can be removed manually at $(CONFIG_DIR)"
