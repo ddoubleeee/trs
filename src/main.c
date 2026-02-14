@@ -3,37 +3,39 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <termios.h>
+#include <dirent.h>
 
-#define CFG_HOME_REL_PATH "trs/test.dict"
 #define XDG_X11_NAME "x11"
 #define XDG_WAYLAND_NAME "wayland"
 #define X11_COPY_CMD "xclip -selection clipboard"
 #define WAYLAND_COPY_CMD "wl-copy"
-#define MAX_DICT_CFG_LINE_LEN 1024
+#define DICT_FILE_EXTENSION ".dict"
+#define MAX_DICT_LINE_LEN 1024
 #define MAX_INPUT_LEN 1024
 #define MAX_RES_LEN 1024
-#define MAX_CFG_PATH_LEN 1024
+#define MAX_DICT_PATH_LEN 1024
 #define CLIPBOARD_SIZE 4096
+#define MAX_DICT_FILES 100
 #define BACKSPACE_CODE 127 // for ~ICANON
 #define EOF_CODE 4 // for ~ICANON
 
 
-typedef struct Translation {
+typedef struct DictEntry {
 	char *src;
 	char *dest;
-} Translation;
+} DictEntry;
 
 struct termios orig;
 
-Translation *load_dict(char *path, int *dict_len_buf);
-void translate_word(const char *word, Translation *dict,  int dict_len, char *res_buffer);
+DictEntry *load_dict(char *path, int *dict_len_buf);
+void translate_word(const char *word, DictEntry *dict,  int dict_len, char *res_buffer);
 int compare_translations(const void *t1, const void *t2);
 void enable_raw_mode();
 void disable_raw_mode();
-void replace_input_res_raw( int input_len, char *res);
+void replace_input_res_raw(int input_len, char *res);
 int copy_buf_to_clipboard(const char *buffer, const char *command);
-void free_dict(Translation *dict, int dict_len);
-char *get_cfg_path(char *cfg_path_buf);
+void free_dict(DictEntry *dict, int dict_len);
+char *get_dict_path(char *dict_path_buf);
 
 const char *get_copy_cmd();
 
@@ -43,8 +45,11 @@ TODO:
 + EOF and '\n' behaviour
 + handle unsorted dictionary configs
 + delete during input
-+ check for config
++ check for .dict file
+	(current behaviour: looks for *.dict, prioritising alpha unless TRS_DEFAULT_DICT env var is set)
+	- add --dict= flag
 - fix bugs on arrows and other control input
+- refactor loading to dynamic realloc
 - non-interactive mode
 
 KNOWN BUGS:
@@ -57,10 +62,10 @@ int main(int argc, const char *argv[]) {
 	char res_buf[MAX_RES_LEN];
 	char clip_buf[CLIPBOARD_SIZE] = {0};
 	int dict_len;
-	char cfg_path_buf[MAX_CFG_PATH_LEN];
+	char dict_path_buf[MAX_DICT_PATH_LEN];
 	const char *copy_cmd = get_copy_cmd();
 
-	Translation *dict = load_dict(get_cfg_path(cfg_path_buf), &dict_len);
+	DictEntry *dict = load_dict(get_dict_path(dict_path_buf), &dict_len);
 	if (!dict) return -1;
 
 	enable_raw_mode();
@@ -133,20 +138,35 @@ int main(int argc, const char *argv[]) {
 	return 0;
 }
 
-char *get_cfg_path(char *cfg_path_buf) {
-	// try thru xdg first
-	const char *home_config_dir_path = getenv("XDG_CONFIG_HOME");
-	if (home_config_dir_path) {
-		snprintf(cfg_path_buf, MAX_CFG_PATH_LEN, "%s/%s", home_config_dir_path, CFG_HOME_REL_PATH);
-	}
-	// if xdg not set try $HOME
-	else {
-		const char *home_config_dir_path_default = getenv("HOME");
-		if (!home_config_dir_path_default) return NULL;
+char *get_dict_path(char *dict_path_buf) {
+	const char *home_path = getenv("HOME");
+	if (!home_path) {perror("getenv"); return NULL;}
 
-		snprintf(cfg_path_buf, MAX_CFG_PATH_LEN, "%s/.config/%s", home_config_dir_path_default, CFG_HOME_REL_PATH);
+	// assuming $HOME/.config/trs/
+	snprintf(dict_path_buf, MAX_DICT_PATH_LEN, "%s/.config/trs", home_path);
+
+	DIR *dir = opendir(dict_path_buf);
+	if (!dir) {perror("opendir"); return NULL;}
+	struct dirent *entry;
+	char *prior_file = NULL;
+
+	while ((entry = readdir(dir))) {
+		// look for *.dict
+		if (strstr(entry->d_name, DICT_FILE_EXTENSION)) {
+			// get 1st by name in alpanum order
+			if (!prior_file || strcmp(entry->d_name, prior_file) < 0) {
+				free(prior_file);
+				prior_file = strdup(entry->d_name);
+			}
+		}
 	}
-	return cfg_path_buf;
+	closedir(dir);
+
+	if (!prior_file) {return NULL;}
+	strncat(dict_path_buf, "/", MAX_DICT_PATH_LEN - strlen(dict_path_buf) - 1);
+    strncat(dict_path_buf, prior_file, MAX_DICT_PATH_LEN - strlen(dict_path_buf) - 1);
+    free(prior_file);
+	return dict_path_buf;
 }
 
 // returns env name
@@ -174,7 +194,7 @@ const char *get_copy_cmd() {
 	return NULL;
 }
 
-void free_dict(Translation *dict, int dict_len) {
+void free_dict(DictEntry *dict, int dict_len) {
 	int i = 0;
 	while (i < dict_len) {
 		free(dict[i].dest);
@@ -215,53 +235,62 @@ void disable_raw_mode() {
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig);
 }
 
-Translation *load_dict(char *path, int *dict_len_buf) {
-	FILE *dict_cfg_file = fopen(path, "r");
-	if (!dict_cfg_file) {perror("fopen"); return NULL;}
+DictEntry *load_dict(char *path, int *dict_len_buf) {
+	FILE *dict_file = fopen(path, "r");
+	if (!dict_file) {perror("fopen"); return NULL;}
 
-	char dict_cfg_line_buffer[MAX_DICT_CFG_LINE_LEN];
+	char dict_file_line_buffer[MAX_DICT_LINE_LEN];
 	int line_count = 0;
 
 	// count dict_len
-	while (fgets(dict_cfg_line_buffer, sizeof(dict_cfg_line_buffer), dict_cfg_file))
+	while (fgets(dict_file_line_buffer, sizeof(dict_file_line_buffer), dict_file)) {
+		char *dest = strtok(dict_file_line_buffer, "=");
+		char *src = strtok(NULL, "\n");
+		// dont count bad parsing
+		if (!dest || !src) continue;
+
 		line_count++;
+	}
 	*dict_len_buf = line_count;
 
-	rewind(dict_cfg_file);
+	rewind(dict_file);
 
 	int i = 0;
-	Translation *dict = malloc(sizeof(Translation) * line_count);
-	if (!dict) {perror("malloc"); return NULL;}
+	DictEntry *dict = malloc(sizeof(DictEntry) * line_count);
+	if (!dict) {
+		perror("malloc");
+		fclose(dict_file);
+		return NULL;
+	}
 	// parse DEST=SRC
-	while (fgets(dict_cfg_line_buffer, sizeof(dict_cfg_line_buffer), dict_cfg_file)) {
-		char *dest = strtok(dict_cfg_line_buffer, "=");
+	while (fgets(dict_file_line_buffer, sizeof(dict_file_line_buffer), dict_file)) {
+		char *dest = strtok(dict_file_line_buffer, "=");
 		char *src = strtok(NULL, "\n");
+		// dont load bad parsing
+		if (!dest || !src) continue;
 
-		dict[i].dest = malloc(strlen(dest) + 1);
-		dict[i].src = malloc(strlen(src) + 1);
+		dict[i].dest = strdup(dest);
+		dict[i].src = strdup(src);
 		if (!dict[i].dest || !dict[i].src) {
-			perror("malloc");
+			perror("strdup");
 			free_dict(dict, *dict_len_buf);
+			fclose(dict_file);
 			return NULL;
 		}
-
-		// store
-		strcpy(dict[i].dest, dest);
-		strcpy(dict[i].src, src);
 		++i;
 	}
 
-	fclose(dict_cfg_file);
+	fclose(dict_file);
 
 	// sort
-	qsort(dict, line_count, sizeof(Translation), compare_translations);
+	qsort(dict, line_count, sizeof(DictEntry), compare_translations);
 	return dict;
 }
 
 // sort by len of src in desc
 int compare_translations(const void *t1, const void *t2) {
-	const Translation *translation1 = t1;
-	const Translation *translation2 = t2;
+	const DictEntry *translation1 = t1;
+	const DictEntry *translation2 = t2;
 
 	size_t t1_src_len = strlen(translation1->src);
 	size_t t2_src_len = strlen(translation2->src);
@@ -271,8 +300,8 @@ int compare_translations(const void *t1, const void *t2) {
 }
 
 
-void translate_word(const char *word, Translation *dict,  int dict_len, char *res_buffer) {
-	int i = 0, res_i = 0;
+void translate_word(const char *word, DictEntry *dict,  int dict_len, char *res_buffer) {
+	int i = 0, i_res = 0;
 	int word_len = strlen(word);
 	while (i < word_len) {
 		int recognised = 0;
@@ -285,10 +314,9 @@ void translate_word(const char *word, Translation *dict,  int dict_len, char *re
 				recognised = 1;
 				const char *dest_letter = dict[j].dest;
 				// result buffer full
-				if ((res_i + strlen(dest_letter) + 1) > MAX_RES_LEN)
-					break;
-				strcpy(res_buffer + res_i, dest_letter);
-				res_i += strlen(dest_letter);
+				if ((i_res + strlen(dest_letter) + 1) > MAX_RES_LEN) break;
+				strcpy(res_buffer + i_res, dest_letter);
+				i_res += strlen(dest_letter);
 
 				i += strlen(src_letter);
 				break;
@@ -296,7 +324,7 @@ void translate_word(const char *word, Translation *dict,  int dict_len, char *re
 		}
 		// just copy orig char
 		if (!recognised)
-			res_buffer[res_i++] = word[i++];
+			res_buffer[i_res++] = word[i++];
 	}
-	res_buffer[res_i] = '\0';
+	res_buffer[i_res] = '\0';
 }
