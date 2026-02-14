@@ -1,6 +1,6 @@
 # trs
 
-Lightweight tool for interactive transliteration (or other key=value mappings) with clipboard support
+Lightweight tool for interactive transliteration (or other `key=value` mappings) with clipboard support
 
 
 ## Preview
@@ -31,7 +31,7 @@ Build:
 make
 ```
 
-Install the binary (`/usr/local/bin/`) and create an example dictionary at `$HOME/.config/trs/example.dict`:
+Install the binary at `/usr/local/bin/` and example dictionaries (`$HOME/.config/trs/`):
 
 ```bash
 make install
