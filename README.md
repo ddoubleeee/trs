@@ -1,6 +1,6 @@
 # trs
 
-Lightweight tool for interactive transliteration (or other `key=value` mappings) with clipboard support
+Lightweight TUI tool for interactive transliteration (or other `key=value` mappings) with clipboard support
 
 
 ## Preview
